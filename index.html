@@ -1,0 +1,221 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        text-align: center;
+      }
+      #ncanvas {
+        margin-top: 2rem;
+        background-color: rgba(80,80,80,0.1);
+        border: 1px solid black;
+      }
+      span {
+        border: 1px solid rgba(0,0,0,0.1);
+        padding: 0 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="ncanvas" width="600" height="600"></canvas>
+    <br>
+    <button onclick="start()">Start</button>
+    <div id="points"></div>
+    <div id="debug"></div>
+  </body>
+  <script>
+
+var app = {};
+
+function start() {
+  walls = [];
+  ball = {x: 0, y: 0, r: 10}
+  state = {
+    _t: 0,
+    st: (new Date()).getTime(),
+    leftHold: false,
+    rightHold: false,
+    useFallThrough: false,
+    ignoreNextWall: false,
+    energy: 100,
+    endGame: false,
+    points: 0,
+  }
+  runLoop()
+  render()
+}
+
+const canvas = document.querySelector('#ncanvas');
+const canvasWidth = 600;
+const canvasHeight = 600;
+const ctx = canvas.getContext('2d');
+
+let ball = {}
+let walls = []
+let state = {}
+
+const fmap = [
+  {
+    maxp: 10,
+    b: 0,
+    c: 0.9,
+  },
+  {
+    maxp: 20,
+    b: 1e-2,
+    c: 0.9,
+  }
+]
+
+document.addEventListener('keydown', (event) => {
+  const keyCode = event.keyCode
+  if (keyCode === 32) {
+    state.useFallThrough = true
+  } else if (keyCode === 37) {
+    state.leftHold = true
+  } else if (keyCode === 39) {
+    state.rightHold = true
+  }
+})
+
+document.addEventListener('keyup', (event) => {
+  const keyCode = event.keyCode
+  if (keyCode === 37) {
+    state.leftHold = false
+  } else if (keyCode === 39) {
+    state.rightHold = false
+  }
+})
+
+function runLoop() {
+  const t = (new Date()).getTime()
+  const td = t - state._t
+  const p = Math.floor((t - state.st) / 1000)
+  let i = 0
+  for (; i < fmap.length - 1; i++) {
+    if (p < fmap[i].maxp) { break }
+  }
+  const f = fmap[i].c + (p * fmap[i].b)
+  state._t = t
+  let startTimeDiff = t - state.st
+  state.points = 1000 + (p * 40) + (p * p * 0.02)
+
+  if (state.useFallThrough) {
+    state.useFallThrough = false
+    if (state.energy > 40) {
+      state.energy -= 40
+      state.ignoreNextWall = true
+    }
+  }
+
+  state.energy = Math.min(state.energy + (td * 0.004 * f), 100)
+
+  let speed = 0.3 + (f * 0.1)
+  if (state.leftHold) {
+    ball.x -= speed * td
+  } else if (state.rightHold) {
+    ball.x += speed * td
+  }
+
+  // Create, destroy walls as needed
+  const nextWallHeight = Math.max(200 - (f * 20), 100)
+  if (walls.length && walls[0].top + walls[0].height < 0) {
+    walls.shift()
+  }
+  if (!walls.length || (walls.length && walls[walls.length - 1].top + walls[walls.length -1].height < canvasHeight - nextWallHeight)) {
+    walls.push({
+      top: canvasHeight,
+      height: 10,
+      leftGap: 50 + (Math.random() * (canvasWidth - 100)),
+      gapWidth: Math.max(120 - f * 15, 25),
+      fallThrough: false,
+      ignoreWall: false,
+    })
+  }
+
+  ball.y += td * 0.1 * f
+
+  // Bottom of canvas
+  if (ball.y > canvasHeight - ball.r) {
+    ball.y = canvasHeight - ball.r
+  }
+  // Sides
+  if (ball.x - ball.r < 0) {
+    ball.x = ball.r
+  } else if (ball.x + ball.r > canvasWidth) {
+    ball.x = canvasWidth - ball.r
+  }
+  // Top
+  if (ball.y < 0) {
+    state.endGame = true
+    return
+  }
+
+  walls.forEach(wall => {
+    wall.top -= 0.5 + (td * 0.05 * f)
+
+    // If the verticals don't intersect, just stop checking now
+    if (ball.y + ball.r < wall.top || ball.y - ball.r > wall.top + wall.height) {
+      return
+    }
+
+    if (wall.ignoreWall) {
+      return
+    }
+
+    let belowWallTop = ball.y + ball.r > wall.top
+    let withinGap = false
+    if (ball.x - ball.r > wall.leftGap && ball.x + ball.r < wall.leftGap + wall.gapWidth) {
+      withinGap = true
+    }
+
+    if (state.ignoreNextWall) {
+      wall.ignoreWall = true
+      state.ignoreNextWall = false
+      return
+    }
+
+    if (wall.fallThrough || (belowWallTop && withinGap)) {
+      // Fix the ball's horizontal within the wall
+      ball.x = Math.max(ball.x, wall.leftGap + ball.r)
+      ball.x = Math.min(ball.x, wall.leftGap + wall.gapWidth - ball.r)
+      wall.fallThrough = true
+    } else if (belowWallTop) {
+      // Fix the ball's vertical to the top wall
+      ball.y = wall.top - ball.r
+    }
+  })
+
+  setTimeout(runLoop, 2)
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+
+  ctx.strokeStyle = 'black'
+  ctx.fillStyle = `rgba(0, 0, 210, ${state.energy/100})`;
+  ctx.beginPath()
+  ctx.arc(ball.x, ball.y, ball.r, 0, 2 * Math.PI, false)
+  ctx.stroke()
+  ctx.fill()
+  ctx.closePath()
+
+  ctx.fillStyle = 'lightblue'
+  walls.forEach(wall => {
+    ctx.fillRect(0, wall.top, wall.leftGap, wall.height)
+    let rightWidth = canvasWidth - (wall.leftGap + wall.gapWidth)
+    ctx.fillRect(wall.leftGap + wall.gapWidth, wall.top, rightWidth, wall.height)
+  })
+  
+  points.textContent = 'Points: ' + state.points
+  if (!state.endGame) {
+    window.requestAnimationFrame(render)
+  }
+}
+
+</script>
+</html>
